@@ -19,23 +19,23 @@ SOURCE_NAME = "Re-entanglements"
 SOURCE_ID = "re-entanglements"
 LOG_FILE = "re-entanglements_scraper.log"
 
-IMAGE_REPO_ID = "nwokikeonyeka/re-entanglements-images"
 AUDIO_REPO_ID = "nwokikeonyeka/re-entanglements-audio"
+DOCUMENT_REPO_ID = "nwokikeonyeka/re-entanglements-documents"
 
 RAW_DIR = "data_re-entanglements_raw"
-RAW_IMG_DIR = os.path.join(RAW_DIR, "images")
 RAW_AUDIO_DIR = os.path.join(RAW_DIR, "audio")
+RAW_DOC_DIR = os.path.join(RAW_DIR, "documents") 
 RAW_JSONL = os.path.join(RAW_DIR, "data.jsonl")
-
-CLEAN_IMAGES_DIR = "data_clean_images"
-CLEAN_IMAGES_ASSETS = os.path.join(CLEAN_IMAGES_DIR, "images")
-CLEAN_IMAGES_JSONL = os.path.join(CLEAN_IMAGES_DIR, "data.jsonl")
-CLEAN_IMAGES_README = os.path.join(CLEAN_IMAGES_DIR, "README.md")
 
 CLEAN_AUDIO_DIR = "data_clean_audio"
 CLEAN_AUDIO_ASSETS = os.path.join(CLEAN_AUDIO_DIR, "audio")
 CLEAN_AUDIO_JSONL = os.path.join(CLEAN_AUDIO_DIR, "data.jsonl")
 CLEAN_AUDIO_README = os.path.join(CLEAN_AUDIO_DIR, "README.md")
+
+CLEAN_DOCUMENTS_DIR = "data_clean_documents"
+CLEAN_DOCUMENTS_ASSETS = os.path.join(CLEAN_DOCUMENTS_DIR, "documents")
+CLEAN_DOCUMENTS_JSONL = os.path.join(CLEAN_DOCUMENTS_DIR, "data.jsonl")
+CLEAN_DOCUMENTS_README = os.path.join(CLEAN_DOCUMENTS_DIR, "README.md")
 
 logging.basicConfig(
     level=logging.INFO,
@@ -56,7 +56,7 @@ def get_json_response(url, params=None):
         logging.error(f"Failed to decode JSON from {url}: {e}")
         return None
     except requests.exceptions.RequestException as e:
-        logging.error(f"Failed to get JSON for {url} with params {params}: {e}")
+        logging.warning(f"Failed to get JSON for {url} with params {params}: {e}")
         return None
 
 def get_all_posts(api_url):
@@ -77,7 +77,7 @@ def get_all_posts(api_url):
         
         if not posts or len(posts) == 0:
             if not posts:
-                logging.error(f"API query failed at page {page}. Stopping.")
+                logging.warning(f"API query failed at page {page}. (This is expected at the end of pagination).")
             else:
                 logging.info(f"No more posts found at page {page}. This is the end.")
             break
@@ -112,7 +112,7 @@ def download_file(file_url, save_dir, post_id, index):
         file_size = os.path.getsize(save_path)
         file_stats = { "file_size_bytes": file_size, "width": None, "height": None }
 
-        if save_dir == RAW_IMG_DIR:
+        if save_dir == RAW_DOC_DIR:
             try:
                 with Image.open(save_path) as img:
                     file_stats["width"], file_stats["height"] = img.size
@@ -135,32 +135,41 @@ def process_post_json(post_json):
     soup = BeautifulSoup(html_content, 'html.parser')
     raw_text_content = soup.get_text("\n", strip=True)
 
-    MODERN_IMAGE_KEYWORDS = r'(studio|workshop|exhibition|installation|artist|researcher|rehearsal|filming|screenshot|article|opening event|scenes from|Ozioma Onuzulike|RitaDoris|Kelani Abass|Chiadikōbi Nwaubani|Paul Basu|George Agbo|Chinyere Odinukwe|Chikaogwu Kanu|Ugonna Umeike|19[5-9]\d|20\d{2}|Stills from|interview|Chike Aniakor|Usifu Jalloh|Shakalearn Mansaray|conservation|Asogwa|Photomontage|project|treatment of|stages in|fieldwork)'
+    MODERN_IMAGE_KEYWORDS = r'(studio|workshop|exhibition|installation|artist|researcher|rehearsal|filming|screenshot|article|opening event|scenes from|Ozioma Onuzulike|RitaDoris|Kelani Abass|Chiadikōbi Nwaubani|Paul Basu|George Agbo|Chinyere Odinukwe|Chikaogwu Kanu|Ugonna Umeike|19[5-9]\d|20\d{2}|Stills from|interview|Chike Aniakor|Usifu Jalloh|Shakalearn Mansaray|conservation|Asogwa|Photomontage|project|treatment of|stages in|fieldwork|M. V. Portman|Edison phonograph|selection of instruments|recent colour photograph|team members|in the lab|Art Assassins|Onyeka Igwe|Dr Janet Topp Fargion|Felix Ekhator|Raphael Anaemena|Hassan Jalloh|Presentations from|Katrina Dring|Works-in-progress)'
+    DOCUMENT_KEYWORDS = r'(Notes and Queries|Statistical analysis|Page proofs|Letter from|Annual Report|herbarium specimens|catalogue|Kew Bulletin|pages from|excerpt from|edition of|album|labels|label|Appendix C|document|manuscript|transcription|sketch map)'
     MODERN_AUDIO_KEYWORDS = r'(discussing|interview|podcast|listen to|Paul Basu|Usifu Jalloh|Chijioke Onuora|Krydz Ikwuemesi|RitaDoris|Chinyere Odinukwe|Ngozi Omeje|Nicholas Thomas|BBC Radio|Ikenna Onwuegbuna|contemporary reworking|2019)'
     HISTORICAL_AUDIO_KEYWORDS = r'(NWT|BL C51|Northcote Thomas|cylinder|recording)'
 
-    scraped_images = []
+    scraped_documents = []
+    
     for i, figure in enumerate(soup.select("figure:has(figcaption)")):
         img_tag = figure.select_one("img")
         if not img_tag: continue
+        
         caption_tag = figure.select_one("figcaption")
         caption_text = caption_tag.get_text(strip=True) if caption_tag else ""
         img_url = img_tag.get('src')
         if not img_url: continue
         
         abs_img_url = urljoin(SITE_BASE_URL, img_url)
-            
-        if not re.search(MODERN_IMAGE_KEYWORDS, caption_text, re.IGNORECASE):
-            img_stats = download_file(abs_img_url, RAW_IMG_DIR, post_id, i)
+        
+        if re.search(MODERN_IMAGE_KEYWORDS, caption_text, re.IGNORECASE):
+            logging.info(f"Skipping MODERN image: '{caption_text[:50]}...'")
+            continue 
+        
+        if re.search(DOCUMENT_KEYWORDS, caption_text, re.IGNORECASE):
+            logging.info(f"Sorting as DOCUMENT: '{caption_text[:50]}...'")
+            img_stats = download_file(abs_img_url, RAW_DOC_DIR, post_id, i)
             if img_stats:
                 new_filename, stats = img_stats
-                scraped_images.append({
+                scraped_documents.append({
                     "file_name": new_filename, "original_url": abs_img_url,
                     "raw_caption": caption_text, "width": stats["width"],
                     "height": stats["height"], "file_size_bytes": stats["file_size_bytes"]
                 })
         else:
-            logging.info(f"Skipping modern-context image: '{caption_text[:50]}...'")
+            logging.info(f"Skipping (non-document) image: '{caption_text[:50]}...'")
+            pass
 
     scraped_audio = []
     for i, audio_tag in enumerate(soup.select("audio[src]")):
@@ -174,11 +183,10 @@ def process_post_json(post_json):
             if caption_tag: caption = caption_tag.get_text(strip=True)
             
         abs_audio_url = urljoin(SITE_BASE_URL, audio_url)
+        is_historical = re.search(HISTORICAL_AUDIO_KEYWORDS, caption, re.IGNORECASE)
+        is_modern = re.search(MODERN_AUDIO_KEYWORDS, caption, re.IGNORECASE)
 
-        is_explicitly_historical = re.search(HISTORICAL_AUDIO_KEYWORDS, caption, re.IGNORECASE)
-        is_explicitly_modern = re.search(MODERN_AUDIO_KEYWORDS, caption, re.IGNORECASE)
-
-        if (is_explicitly_historical or 'Untitled Audio' in caption) and not is_explicitly_modern:
+        if (is_historical or 'Untitled Audio' in caption) and not is_modern:
             logging.info(f"Keeping historical/untitled audio: '{caption[:50]}...'")
             audio_stats = download_file(abs_audio_url, RAW_AUDIO_DIR, post_id, i)
             if audio_stats:
@@ -207,8 +215,8 @@ def process_post_json(post_json):
         "original_url": post_url, 
         "title": title,
         "raw_content": raw_text_content,
-        "images": scraped_images,
         "audio": scraped_audio,
+        "documents": scraped_documents,
         "tags_scraped": list(set(tags)),
         "license_info": "Copyright © 2025 [Re:]Entanglements",
         "timestamp_scraped": datetime.now().isoformat(),
@@ -223,7 +231,7 @@ def process_post_json(post_json):
 def run_scraper():
     logging.info(f"--- [PART 1/4] Starting API scrape of {API_BASE_URL} ---")
     
-    for path in [RAW_IMG_DIR, RAW_AUDIO_DIR]:
+    for path in [RAW_AUDIO_DIR, RAW_DOC_DIR]:
         os.makedirs(path, exist_ok=True)
         
     if os.path.exists(RAW_JSONL):
@@ -236,7 +244,7 @@ def run_scraper():
         for post in tqdm(all_posts_json, desc="Processing posts"):
             try:
                 data = process_post_json(post)
-                if data and (data['images'] or data['audio']):
+                if data and (data['audio'] or data['documents']):
                     f.write(json.dumps(data) + "\n")
             except Exception as e:
                 logging.error(f"❌ Failed to process post ID {post.get('id')}: {e}")
@@ -245,79 +253,77 @@ def run_scraper():
 def run_cleaner_and_splitter():
     logging.info(f"\n--- [PART 2/4] Cleaning and Splitting the data ---")
 
-    if os.path.exists(CLEAN_IMAGES_DIR): shutil.rmtree(CLEAN_IMAGES_DIR)
     if os.path.exists(CLEAN_AUDIO_DIR): shutil.rmtree(CLEAN_AUDIO_DIR)
-    for path in [CLEAN_IMAGES_ASSETS, CLEAN_AUDIO_ASSETS]:
+    if os.path.exists(CLEAN_DOCUMENTS_DIR): shutil.rmtree(CLEAN_DOCUMENTS_DIR)
+    for path in [CLEAN_AUDIO_ASSETS, CLEAN_DOCUMENTS_ASSETS]:
         os.makedirs(path, exist_ok=True)
 
-    good_images = set()
-    bad_images_count = 0
-    image_files = os.listdir(RAW_IMG_DIR)
-    audio_files = os.listdir(RAW_AUDIO_DIR)
+    good_documents = set()
+    bad_documents_count = 0
+    
+    if os.path.exists(RAW_DOC_DIR):
+        doc_files = os.listdir(RAW_DOC_DIR)
+        for filename in tqdm(doc_files, desc="Validating Documents"):
+            source_path = os.path.join(RAW_DOC_DIR, filename)
+            clean_path = os.path.join(CLEAN_DOCUMENTS_ASSETS, filename)
+            try:
+                with Image.open(source_path) as img:
+                    img.verify()
+                shutil.copy(source_path, clean_path)
+                good_documents.add(filename)
+            except Exception as e:
+                bad_documents_count += 1
+                logging.warning(f"Skipping bad document image {filename}: {e}")
+        logging.info(f"Validated and moved {len(good_documents)} documents. Skipped {bad_documents_count} bad documents.")
+    else:
+        logging.info("No raw document directory found. Skipping validation.")
 
-    for filename in tqdm(image_files, desc="Validating images"):
-        source_path = os.path.join(RAW_IMG_DIR, filename)
-        clean_path = os.path.join(CLEAN_IMAGES_ASSETS, filename)
-        try:
-            with Image.open(source_path) as img:
-                img.verify()
-            shutil.copy(source_path, clean_path)
-            good_images.add(filename)
-        except Exception as e:
-            bad_images_count += 1
-            logging.warning(f"Skipping bad image {filename}: {e}")
-    logging.info(f"Found and skipped {bad_images_count} bad images.")
+    audio_files = []
+    if os.path.exists(RAW_AUDIO_DIR):
+        audio_files = os.listdir(RAW_AUDIO_DIR)
+        logging.info("Copying audio files...")
+        for filename in tqdm(audio_files, desc="Copying Audio"):
+            shutil.copy(os.path.join(RAW_AUDIO_DIR, filename), CLEAN_AUDIO_ASSETS)
+        logging.info(f"Copied {len(audio_files)} audio files.")
+    else:
+        logging.info("No raw audio directory found. Skipping copy.")
 
-    logging.info("Copying audio files to clean directory...")
-    for filename in tqdm(audio_files, desc="Copying audio"):
-        shutil.copy(os.path.join(RAW_AUDIO_DIR, filename), CLEAN_AUDIO_ASSETS)
-    logging.info(f"Copied {len(audio_files)} audio files.")
-
-    image_lines = 0
     audio_lines = 0
+    document_lines = 0
+
     if os.path.exists(RAW_JSONL):
         with open(RAW_JSONL, "r", encoding="utf-8") as f_in, \
-             open(CLEAN_IMAGES_JSONL, "w", encoding="utf-8") as f_img_out, \
-             open(CLEAN_AUDIO_JSONL, "w", encoding="utf-8") as f_aud_out:
+             open(CLEAN_AUDIO_JSONL, "w", encoding="utf-8") as f_aud_out, \
+             open(CLEAN_DOCUMENTS_JSONL, "w", encoding="utf-8") as f_doc_out:
             
             for line in f_in:
                 data = json.loads(line)
                 
-                img_data = deepcopy(data) 
-                aud_data = deepcopy(data) 
-                
-                img_data['images'] = [img for img in img_data['images'] if img['file_name'] in good_images]
-                
-                if img_data['images']:
-                    del img_data['audio'] 
-                    f_img_out.write(json.dumps(img_data) + "\n")
-                    image_lines += 1
-                    
-                if aud_data['audio']:
-                    del aud_data['images'] 
-                    f_aud_out.write(json.dumps(aud_data) + "\n")
-                    audio_lines += 1
+                if data.get('audio'):
+                    aud_data = deepcopy(data)
+                    if aud_data['audio']:
+                        if 'documents' in aud_data: del aud_data['documents']
+                        f_aud_out.write(json.dumps(aud_data) + "\n")
+                        audio_lines += 1
+
+                if data.get('documents'):
+                    doc_data = deepcopy(data)
+                    doc_data['documents'] = [doc for doc in doc_data['documents'] if doc['file_name'] in good_documents]
+                    if doc_data['documents']:
+                        if 'audio' in doc_data: del doc_data['audio']
+                        f_doc_out.write(json.dumps(doc_data) + "\n")
+                        document_lines += 1
     else:
         logging.error("raw data.jsonl file not found. Scraper may have failed.")
 
-    logging.info(f"Wrote {image_lines} lines to {CLEAN_IMAGES_JSONL}.")
     logging.info(f"Wrote {audio_lines} lines to {CLEAN_AUDIO_JSONL}.")
+    logging.info(f"Wrote {document_lines} lines to {CLEAN_DOCUMENTS_JSONL}.")
     logging.info("✅ Cleaning and splitting complete.")
     
-    return image_lines, len(good_images), audio_lines, len(audio_files)
+    return audio_lines, len(audio_files), document_lines, len(good_documents)
 
-def create_readmes(image_lines, image_count, audio_lines, audio_count):
+def create_readmes(audio_lines, audio_count, document_lines, document_count):
     logging.info(f"\n--- [PART 3/4] Creating placeholder READMEs ---")
-    readme_images = f"""---
-dataset_info:
-  license: other
----
-# Re-entanglements (Images) Dataset
-This dataset contains {image_lines} posts with {image_count} historical images scraped from the Re-entanglements project.
-**This is a placeholder README.md. Full metadata will be added later.**
-"""
-    with open(CLEAN_IMAGES_README, "w", encoding="utf-8") as f:
-        f.write(readme_images)
 
     readme_audio = f"""---
 dataset_info:
@@ -329,40 +335,29 @@ This dataset contains {audio_lines} posts with {audio_count} historical audio fi
 """
     with open(CLEAN_AUDIO_README, "w", encoding="utf-8") as f:
         f.write(readme_audio)
-    logging.info("✅ Placeholder READMEs created.")
+
+    readme_documents = f"""---
+dataset_info:
+  license: other
+---
+# Re-entanglements (Documents) Dataset
+This dataset contains {document_lines} posts with {document_count} images of historical documents (letters, catalogue pages, specimens, charts) scraped from the Re-entanglements project.
+**This is a placeholder README.md. Full metadata will be added later.**
+"""
+    with open(CLEAN_DOCUMENTS_README, "w", encoding="utf-8") as f:
+        f.write(readme_documents)
+    logging.info("✅ 2 Placeholder READMEs created.")
 
 def upload_to_hf(token):
     logging.info(f"\n--- [PART 4/4] Uploading to Hugging Face ---")
-
-    logging.info(f"Preparing to upload {CLEAN_IMAGES_DIR} to {IMAGE_REPO_ID}...")
-    for attempt in range(3):
-        try:
-            api = HfApi(token=token)
-            create_repo(IMAGE_REPO_ID, repo_type="dataset", token=token, exist_ok=True)
-            api.upload_folder(
-                folder_path=CLEAN_IMAGES_DIR,
-                repo_id=IMAGE_REPO_ID,
-                repo_type="dataset",
-            )
-            logging.info(f"✅ Successfully uploaded IMAGE dataset.")
-            break
-        except Exception as e:
-            logging.error(f"\n❌ Image upload attempt {attempt + 1} failed: {e}")
-            if attempt < 2: 
-                logging.info("Retrying in 10 seconds...")
-                time.sleep(10)
-            else:
-                logging.error("Final image upload attempt failed.")
+    api = HfApi(token=token)
 
     logging.info(f"Preparing to upload {CLEAN_AUDIO_DIR} to {AUDIO_REPO_ID}...")
     for attempt in range(3):
         try:
-            api = HfApi(token=token)
             create_repo(AUDIO_REPO_ID, repo_type="dataset", token=token, exist_ok=True)
             api.upload_folder(
-                folder_path=CLEAN_AUDIO_DIR,
-                repo_id=AUDIO_REPO_ID,
-                repo_type="dataset",
+                folder_path=CLEAN_AUDIO_DIR, repo_id=AUDIO_REPO_ID, repo_type="dataset"
             )
             logging.info(f"✅ Successfully uploaded AUDIO dataset.")
             break
@@ -374,8 +369,25 @@ def upload_to_hf(token):
             else:
                 logging.error("Final audio upload attempt failed.")
 
+    logging.info(f"Preparing to upload {CLEAN_DOCUMENTS_DIR} to {DOCUMENT_REPO_ID}...")
+    for attempt in range(3):
+        try:
+            create_repo(DOCUMENT_REPO_ID, repo_type="dataset", token=token, exist_ok=True)
+            api.upload_folder(
+                folder_path=CLEAN_DOCUMENTS_DIR, repo_id=DOCUMENT_REPO_ID, repo_type="dataset"
+            )
+            logging.info(f"✅ Successfully uploaded DOCUMENT dataset.")
+            break
+        except Exception as e:
+            logging.error(f"\n❌ Document upload attempt {attempt + 1} failed: {e}")
+            if attempt < 2: 
+                logging.info("Retrying in 10 seconds...")
+                time.sleep(10)
+            else:
+                logging.error("Final document upload attempt failed.")
+
 def main():
-    logging.info(f"--- Starting new {SOURCE_NAME} scrape (Production Version) ---")
+    logging.info(f"--- Starting new {SOURCE_NAME} scrape (Audio/Docs Only, Correct Logic) ---")
     
     HF_TOKEN = os.getenv("HF_TOKEN")
     if not HF_TOKEN:
@@ -386,14 +398,14 @@ def main():
         shutil.rmtree(RAW_DIR)
 
     run_scraper()
-    image_lines, image_count, audio_lines, audio_count = run_cleaner_and_splitter()
-    create_readmes(image_lines, image_count, audio_lines, audio_count)
+    audio_lines, audio_count, document_lines, document_count = run_cleaner_and_splitter()
+    create_readmes(audio_lines, audio_count, document_lines, document_count)
     upload_to_hf(HF_TOKEN)
 
     logging.info("\n" + "="*50)
     logging.info(f"✅✅✅ {SOURCE_NAME} SCRAPE COMPLETE! ✅✅✅")
-    logging.info(f"Image dataset: https://huggingface.co/datasets/{IMAGE_REPO_ID}")
     logging.info(f"Audio dataset: https://huggingface.co/datasets/{AUDIO_REPO_ID}")
+    logging.info(f"Document dataset: https://huggingface.co/datasets/{DOCUMENT_REPO_ID}")
     logging.info("="*50)
 
 if __name__ == "__main__":
